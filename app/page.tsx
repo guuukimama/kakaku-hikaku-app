@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase"; // Supabaseをインポート
+import { supabase } from "@/lib/supabase";
 import {
   Search,
   Camera,
@@ -14,6 +14,7 @@ import {
   Loader2,
 } from "lucide-react";
 
+// --- (補助関数 toKatakana, synonymMap はそのまま維持) ---
 const toKatakana = (str: string) =>
   str.replace(/[ぁ-ん]/g, (s) => String.fromCharCode(s.charCodeAt(0) + 0x60));
 
@@ -33,18 +34,14 @@ function HomeContent() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    // DBから商品リストを取得（店舗名も一緒に持ってくる）
     const fetchItems = async () => {
       setLoading(true);
       const { data, error } = await supabase.from("shopping_list").select(`
           *,
-          shops (
-            name
-          )
+          shops ( name )
         `);
 
       if (data) {
-        // 表示しやすいようにデータを整形
         const formattedData = data.map((item: any) => ({
           ...item,
           shopName: item.shops?.name || "不明な店舗",
@@ -55,18 +52,32 @@ function HomeContent() {
     };
 
     fetchItems();
-
     const q = searchParams.get("search");
     if (q) setSearchTerm(q);
   }, [searchParams]);
 
-  const addToCart = (product: any) => {
-    // カート機能は一旦localStorageのままでもOK（買い物中の一時的なリストのため）
-    const data = localStorage.getItem("cart-list");
-    const cart = data ? JSON.parse(data) : [];
-    cart.push({ ...product, cartId: Date.now() });
-    localStorage.setItem("cart-list", JSON.stringify(cart));
-    alert("買い物リストに追加しました");
+  // ★ここを修正：localStorageではなくSupabaseへ保存
+  const addToCart = async (product: any) => {
+    try {
+      const { error } = await supabase.from("cart_items").insert([
+        {
+          name: product.name,
+          price: product.price,
+          shop_id: product.shop_id, // shop_id（アンダーバー）で保存
+          stock: product.stock || 0,
+          checked: false,
+        },
+      ]);
+
+      if (error) throw error;
+
+      alert(`${product.name} を買い物リストに追加しました！`);
+    } catch (error: any) {
+      console.error("カート追加エラー:", error);
+      alert(
+        "リストへの追加に失敗しました。SQLが実行されているか確認してください。"
+      );
+    }
   };
 
   const filtered =
@@ -89,6 +100,7 @@ function HomeContent() {
           return false;
         });
 
+  // --- (grouped の計算ロジックもそのまま維持) ---
   const grouped: { [key: string]: any[] } = {};
   filtered.forEach((item) => {
     const amount = parseFloat(item.amount) || 1;
@@ -178,7 +190,7 @@ function HomeContent() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-bold text-gray-500">
-                            {p.shopName} {/* DBから取得した店舗名を表示 */}
+                            {p.shopName}
                           </span>
                           {idx === 0 && (
                             <span className="text-[9px] bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-black">
@@ -212,7 +224,8 @@ function HomeContent() {
               </div>
             </div>
           ))
-        ) : searchTerm !== "" ? (
+        ) : /* --- (検索結果なし/初期表示の表示部分は維持) --- */
+        searchTerm !== "" ? (
           <div className="text-center py-20 text-gray-400">
             <p className="font-bold">「{searchTerm}」は見つかりませんでした</p>
             <Link
@@ -226,16 +239,13 @@ function HomeContent() {
           <div className="text-center py-20 text-gray-300">
             <ShoppingBag size={48} className="mx-auto mb-4 opacity-20" />
             <p className="font-bold text-sm">
-              上の検索バーから商品を検索して
-              <br />
-              価格を比較してください
+              検索バーから商品を検索してください
             </p>
           </div>
         )}
       </div>
 
-      {/* ナビゲーション */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 flex justify-around p-3 pb-8 z-30">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 flex justify-around p-3 pb-8 z-30">
         <Link
           href="/inventory"
           className="text-gray-400 flex flex-col items-center flex-1"
@@ -243,7 +253,6 @@ function HomeContent() {
           <PackageSearch size={26} />
           <span className="text-[10px] font-bold mt-1">在庫</span>
         </Link>
-
         <Link href="/scan" className="flex flex-col items-center flex-1 -mt-10">
           <div className="bg-blue-600 text-white p-4 rounded-full shadow-xl ring-4 ring-white active:scale-90 transition-transform">
             <Camera size={28} />
@@ -252,7 +261,6 @@ function HomeContent() {
             スキャン
           </span>
         </Link>
-
         <Link
           href="/shopping-list"
           className="text-gray-400 flex flex-col items-center flex-1"
@@ -260,7 +268,7 @@ function HomeContent() {
           <ShoppingBag size={26} />
           <span className="text-[10px] font-bold mt-1">リスト</span>
         </Link>
-      </div>
+      </nav>
     </main>
   );
 }
