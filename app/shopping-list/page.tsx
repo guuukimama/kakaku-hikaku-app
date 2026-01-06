@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase";
 import {
   RefreshCcw,
   PackageSearch,
@@ -11,55 +12,93 @@ import {
   CheckCircle2,
   Circle,
   MapPin,
+  Loader2,
 } from "lucide-react";
 
 export default function ShoppingListPage() {
   const [cart, setCart] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const data = localStorage.getItem("cart-list");
-    if (data) setCart(JSON.parse(data));
-  }, []);
+  // DBから「買い物リスト（カート）」を取得
+  // 今回は shopping_list テーブル内の「is_in_cart」フラグで管理する形にします
+  // もし別テーブルを作るのが面倒な場合、これが一番スマートです
+  const loadCart = async () => {
+    setLoading(true);
+    // 便宜上、今回は「cart-list」という別のテーブルをSupabaseに作ったと仮定するか、
+    // もしくは既存のテーブルに is_in_cart カラムを追加して対応します。
+    // ここでは一番確実な「cart_items」テーブルを参照する形で書きます。
+    const { data, error } = await supabase.from("cart_items").select(`
+        *,
+        shops ( name )
+      `);
 
-  // 個別のチェック切り替え
-  const toggleCheck = (cartId: number) => {
-    const newList = cart.map((item) => {
-      if (item.cartId === cartId) {
-        return { ...item, checked: !item.checked };
-      }
-      return item;
-    });
-    setCart(newList);
-    localStorage.setItem("cart-list", JSON.stringify(newList));
+    if (data) {
+      setCart(
+        data.map((item) => ({
+          ...item,
+          shopName: item.shops?.name || "その他",
+        }))
+      );
+    }
+    setLoading(false);
   };
 
-  // チェックを入れた項目だけを削除（ゴミ箱ボタン）
-  const removeCheckedItems = () => {
-    const checkedCount = cart.filter((i) => i.checked).length;
-    if (checkedCount === 0) {
+  useEffect(() => {
+    loadCart();
+  }, []);
+
+  // チェック（購入済み）の切り替え
+  const toggleCheck = async (item: any) => {
+    const newStatus = !item.checked;
+
+    const { error } = await supabase
+      .from("cart_items")
+      .update({ checked: newStatus })
+      .eq("id", item.id);
+
+    if (!error) {
+      setCart(
+        cart.map((i) => (i.id === item.id ? { ...i, checked: newStatus } : i))
+      );
+    }
+  };
+
+  // 削除機能
+  const removeCheckedItems = async () => {
+    const checkedItems = cart.filter((i) => i.checked);
+
+    if (checkedItems.length === 0) {
       if (confirm("リストをすべて空にしますか？")) {
-        setCart([]);
-        localStorage.removeItem("cart-list");
+        const { error } = await supabase
+          .from("cart_items")
+          .delete()
+          .neq("id", 0);
+        if (!error) setCart([]);
       }
       return;
     }
 
-    if (confirm(`${checkedCount}件のチェック済み商品を削除しますか？`)) {
-      const newList = cart.filter((item) => !item.checked);
-      setCart(newList);
-      localStorage.setItem("cart-list", JSON.stringify(newList));
+    if (confirm(`${checkedItems.length}件のチェック済み商品を削除しますか？`)) {
+      const idsToRemove = checkedItems.map((i) => i.id);
+      const { error } = await supabase
+        .from("cart_items")
+        .delete()
+        .in("id", idsToRemove);
+      if (!error) {
+        setCart(cart.filter((i) => !idsToRemove.includes(i.id)));
+      }
     }
   };
 
   const groupedByShop = cart.reduce((acc: any, item: any) => {
-    const shop = item.shop || "その他";
+    const shop = item.shopName;
     if (!acc[shop]) acc[shop] = [];
     acc[shop].push(item);
     return acc;
   }, {});
 
   return (
-    <main className="min-h-screen bg-gray-50 pb-24 text-black">
+    <main className="min-h-screen bg-gray-50 pb-24 text-black font-sans">
       <header className="bg-white px-4 pt-4 pb-4 shadow-sm sticky top-0 z-20">
         <div className="flex items-center justify-between relative">
           <Link href="/" className="flex items-center gap-1 z-10">
@@ -73,7 +112,6 @@ export default function ShoppingListPage() {
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <h2 className="text-sm font-bold text-gray-500">買い物リスト</h2>
           </div>
-          {/* ゴミ箱ボタン：チェックありならそれらを削除、なしなら全削除 */}
           <button
             onClick={removeCheckedItems}
             className="z-10 text-gray-400 p-2 active:scale-90 transition-transform"
@@ -89,7 +127,11 @@ export default function ShoppingListPage() {
       </header>
 
       <div className="p-4 space-y-6">
-        {Object.keys(groupedByShop).length === 0 ? (
+        {loading ? (
+          <div className="text-center py-20">
+            <Loader2 className="animate-spin mx-auto text-gray-300" size={32} />
+          </div>
+        ) : Object.keys(groupedByShop).length === 0 ? (
           <div className="text-center py-20 text-gray-300 font-bold italic">
             リストは空です
           </div>
@@ -104,12 +146,11 @@ export default function ShoppingListPage() {
                   </h3>
                   <div className="flex-1 border-b border-blue-100 border-dashed"></div>
                 </div>
-
                 <div className="space-y-2">
                   {items.map((item: any) => (
                     <div
-                      key={item.cartId}
-                      onClick={() => toggleCheck(item.cartId)}
+                      key={item.id}
+                      onClick={() => toggleCheck(item)}
                       className={`bg-white p-4 rounded-3xl shadow-sm border transition-all cursor-pointer flex justify-between items-center ${
                         item.checked
                           ? "border-gray-100 opacity-60"
@@ -126,7 +167,7 @@ export default function ShoppingListPage() {
                         </div>
                         <div>
                           <h3
-                            className={`font-black text-sm transition-all ${
+                            className={`font-black text-sm ${
                               item.checked
                                 ? "line-through text-gray-400"
                                 : "text-gray-800"

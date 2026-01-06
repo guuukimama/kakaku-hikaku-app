@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase"; // Supabaseをインポート
 import {
   RefreshCcw,
   PackageSearch,
@@ -10,49 +11,72 @@ import {
   Plus,
   Minus,
   LayoutList,
-  Store, // 店舗アイコンを追加
+  Store,
+  Loader2,
 } from "lucide-react";
 
 export default function InventoryPage() {
   const [masterItems, setMasterItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const loadData = () => {
-    const data = localStorage.getItem("shopping-list");
+  // DBからデータを取得する関数
+  const loadData = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("shopping_list")
+      .select("*")
+      .order("created_at", { ascending: false });
+
     if (data) {
-      const allData = JSON.parse(data);
+      // 名前、ブランド、容量が同じものは「同一商品」としてまとめ、在庫を合算する
       const uniqueMap = new Map();
-      allData.forEach((item: any) => {
+      data.forEach((item: any) => {
         const key = `${item.name}-${item.brand || "no-brand"}-${
           item.amount || ""
         }`;
         if (!uniqueMap.has(key)) {
           uniqueMap.set(key, { ...item });
+        } else {
+          // すでに同じ商品があれば在庫数だけ同期（必要に応じて）
+          const existing = uniqueMap.get(key);
+          if (item.stock > existing.stock) {
+            uniqueMap.set(key, { ...item });
+          }
         }
       });
       setMasterItems(Array.from(uniqueMap.values()));
     }
+    setLoading(false);
   };
 
   useEffect(() => {
     loadData();
   }, []);
 
-  const updateStock = (targetItem: any, delta: number) => {
-    const data = localStorage.getItem("shopping-list");
-    if (!data) return;
-    const allData = JSON.parse(data);
-    const currentStock = targetItem.stock || 0;
-    const newStock = Math.max(0, currentStock + delta);
+  // 在庫数を更新する関数（DBを直接書き換え）
+  const updateStock = async (targetItem: any, delta: number) => {
+    const newStock = Math.max(0, (targetItem.stock || 0) + delta);
 
-    const newList = allData.map((item: any) => {
-      if (item.name === targetItem.name && item.brand === targetItem.brand) {
-        return { ...item, stock: newStock };
-      }
-      return item;
-    });
+    // 同じ商品名・ブランドのものはすべて在庫数を同期させる
+    const { error } = await supabase
+      .from("shopping_list")
+      .update({ stock: newStock })
+      .eq("name", targetItem.name)
+      .eq("brand", targetItem.brand);
 
-    localStorage.setItem("shopping-list", JSON.stringify(newList));
-    loadData();
+    if (error) {
+      console.error("在庫更新エラー:", error);
+      alert("更新に失敗しました");
+    } else {
+      // ローカルの表示状態も更新
+      setMasterItems((prev) =>
+        prev.map((item) =>
+          item.name === targetItem.name && item.brand === targetItem.brand
+            ? { ...item, stock: newStock }
+            : item
+        )
+      );
+    }
   };
 
   return (
@@ -72,31 +96,22 @@ export default function InventoryPage() {
             <h2 className="text-sm font-bold text-gray-500">在庫・マスタ</h2>
           </div>
 
-          {/* 右側のボタンエリア */}
           <div className="flex items-center gap-1 z-10">
-            {/* 店舗マスタボタンを追加 */}
             <Link
               href="/shop-master"
-              className="bg-blue-50 p-2 rounded-xl text-blue-600 border border-blue-100 hover:bg-blue-100 transition-colors"
-              title="店舗マスタ"
+              className="bg-blue-50 p-2 rounded-xl text-blue-600 border border-blue-100"
             >
               <Store size={20} />
             </Link>
-
-            {/* 商品マスタボタン */}
             <Link
               href="/master"
-              className="bg-gray-50 p-2 rounded-xl text-gray-600 border border-gray-100 hover:bg-gray-100 transition-colors"
-              title="商品マスタ"
+              className="bg-gray-50 p-2 rounded-xl text-gray-600 border border-gray-100"
             >
               <LayoutList size={20} />
             </Link>
-
-            {/* 新規登録ボタン */}
             <Link
               href="/add-product"
-              className="bg-gray-900 p-2 rounded-xl text-white hover:bg-black transition-colors"
-              title="新規登録"
+              className="bg-gray-900 p-2 rounded-xl text-white"
             >
               <Plus size={20} />
             </Link>
@@ -104,9 +119,12 @@ export default function InventoryPage() {
         </div>
       </header>
 
-      {/* --- 以降、商品リスト部分は同じ --- */}
       <div className="p-4 space-y-3">
-        {masterItems.length === 0 ? (
+        {loading ? (
+          <div className="text-center py-20">
+            <Loader2 className="animate-spin mx-auto text-gray-300" size={32} />
+          </div>
+        ) : masterItems.length === 0 ? (
           <div className="text-center py-20 flex flex-col items-center gap-4">
             <PackageSearch size={48} className="text-gray-200" />
             <div className="text-gray-400 font-bold">
@@ -130,7 +148,7 @@ export default function InventoryPage() {
                     </span>
                   )}
                   <span className="text-[9px] text-gray-300 font-bold">
-                    #登録済
+                    #クラウド同期中
                   </span>
                 </div>
                 <h3 className="font-black text-sm text-gray-800">
@@ -145,7 +163,7 @@ export default function InventoryPage() {
               <div className="flex items-center bg-gray-50 rounded-2xl p-1 gap-4 border border-gray-100">
                 <button
                   onClick={() => updateStock(item, -1)}
-                  className="w-9 h-9 flex items-center justify-center bg-white rounded-xl shadow-sm active:scale-95 transition-transform"
+                  className="w-9 h-9 flex items-center justify-center bg-white rounded-xl shadow-sm"
                 >
                   <Minus size={18} className="text-gray-400" />
                 </button>
@@ -154,7 +172,7 @@ export default function InventoryPage() {
                 </div>
                 <button
                   onClick={() => updateStock(item, 1)}
-                  className="w-9 h-9 flex items-center justify-center bg-blue-600 text-white rounded-xl shadow-md active:scale-95 transition-transform"
+                  className="w-9 h-9 flex items-center justify-center bg-blue-600 text-white rounded-xl shadow-md"
                 >
                   <Plus size={18} />
                 </button>
@@ -164,7 +182,6 @@ export default function InventoryPage() {
         )}
       </div>
 
-      {/* --- ナビゲーションバー --- */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 flex justify-around p-3 pb-8 z-30">
         <Link
           href="/inventory"
