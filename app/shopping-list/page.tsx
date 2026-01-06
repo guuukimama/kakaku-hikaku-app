@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase"; // Supabaseをインポート
 import {
   RefreshCcw,
   PackageSearch,
@@ -19,18 +19,19 @@ export default function ShoppingListPage() {
   const [cart, setCart] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // DBから「買い物リスト（カート）」を取得
-  // 今回は shopping_list テーブル内の「is_in_cart」フラグで管理する形にします
-  // もし別テーブルを作るのが面倒な場合、これが一番スマートです
+  // DBから「買い物リスト」を取得
   const loadCart = async () => {
     setLoading(true);
-    // 便宜上、今回は「cart-list」という別のテーブルをSupabaseに作ったと仮定するか、
-    // もしくは既存のテーブルに is_in_cart カラムを追加して対応します。
-    // ここでは一番確実な「cart_items」テーブルを参照する形で書きます。
-    const { data, error } = await supabase.from("cart_items").select(`
+    // shopsテーブルと結合して店舗名を取得
+    const { data, error } = await supabase
+      .from("cart_items")
+      .select(
+        `
         *,
         shops ( name )
-      `);
+      `
+      )
+      .order("created_at", { ascending: true });
 
     if (data) {
       setCart(
@@ -47,7 +48,7 @@ export default function ShoppingListPage() {
     loadCart();
   }, []);
 
-  // チェック（購入済み）の切り替え
+  // チェック（購入済み）の切り替えをDBに反映
   const toggleCheck = async (item: any) => {
     const newStatus = !item.checked;
 
@@ -63,7 +64,7 @@ export default function ShoppingListPage() {
     }
   };
 
-  // 削除機能
+  // 削除機能：チェック済みを消す or 全部消す
   const removeCheckedItems = async () => {
     const checkedItems = cart.filter((i) => i.checked);
 
@@ -72,7 +73,8 @@ export default function ShoppingListPage() {
         const { error } = await supabase
           .from("cart_items")
           .delete()
-          .neq("id", 0);
+          .neq("id", "00000000-0000-0000-0000-000000000000"); // 全削除
+
         if (!error) setCart([]);
       }
       return;
@@ -84,12 +86,14 @@ export default function ShoppingListPage() {
         .from("cart_items")
         .delete()
         .in("id", idsToRemove);
+
       if (!error) {
         setCart(cart.filter((i) => !idsToRemove.includes(i.id)));
       }
     }
   };
 
+  // 店舗ごとにグループ化するロジック
   const groupedByShop = cart.reduce((acc: any, item: any) => {
     const shop = item.shopName;
     if (!acc[shop]) acc[shop] = [];
@@ -132,7 +136,7 @@ export default function ShoppingListPage() {
             <Loader2 className="animate-spin mx-auto text-gray-300" size={32} />
           </div>
         ) : Object.keys(groupedByShop).length === 0 ? (
-          <div className="text-center py-20 text-gray-300 font-bold italic">
+          <div className="text-center py-20 text-gray-400 font-bold italic">
             リストは空です
           </div>
         ) : (
@@ -181,7 +185,7 @@ export default function ShoppingListPage() {
                                 item.checked ? "text-gray-300" : "text-blue-600"
                               }`}
                             >
-                              ¥{item.price}
+                              ¥{item.price?.toLocaleString()}
                             </p>
                             <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold">
                               在庫: {item.stock || 0}
@@ -198,6 +202,7 @@ export default function ShoppingListPage() {
         )}
       </div>
 
+      {/* ナビゲーション */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 flex justify-around p-3 pb-8 z-30">
         <Link
           href="/inventory"

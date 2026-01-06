@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase"; // インポート追加
 import {
   ArrowLeft,
   Edit3,
@@ -11,41 +12,64 @@ import {
   Store,
   Package,
   ChevronRight,
-  Tag,
+  Loader2, // 読み込み中アイコン
 } from "lucide-react";
 
 export default function MasterPage() {
-  const [viewMode, setViewMode] = useState<"shop" | "product">("shop"); // 表示モード管理
+  const [viewMode, setViewMode] = useState<"shop" | "product">("shop");
   const [shoppingList, setShoppingList] = useState<any[]>([]);
   const [shops, setShops] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const router = useRouter();
 
-  useEffect(() => {
-    const productData = localStorage.getItem("shopping-list");
-    const shopData = localStorage.getItem("shop-master");
-    if (productData) setShoppingList(JSON.parse(productData));
-    if (shopData) setShops(JSON.parse(shopData));
-  }, []);
+  // DBから全データを読み込む
+  const loadAllData = async () => {
+    setLoading(true);
 
-  const deleteItem = (id: string) => {
-    if (!confirm("このデータを削除しますか？")) return;
-    const newList = shoppingList.filter((i: any) => i.id !== id);
-    setShoppingList(newList);
-    localStorage.setItem("shopping-list", JSON.stringify(newList));
+    // 店舗データと商品データを並列で取得
+    const [shopsRes, productsRes] = await Promise.all([
+      supabase.from("shops").select("*").order("name"),
+      supabase
+        .from("shopping_list")
+        .select("*")
+        .order("created_at", { ascending: false }),
+    ]);
+
+    if (shopsRes.data) setShops(shopsRes.data);
+    if (productsRes.data) setShoppingList(productsRes.data);
+
+    setLoading(false);
   };
 
-  // --- データの加工 ---
+  useEffect(() => {
+    loadAllData();
+  }, []);
 
-  // 1. 店舗別にグループ化
+  // 削除機能もDB連動に
+  const deleteItem = async (id: string) => {
+    if (!confirm("このデータを削除しますか？")) return;
+
+    const { error } = await supabase
+      .from("shopping_list")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      alert("削除に失敗しました");
+    } else {
+      setShoppingList(shoppingList.filter((i: any) => i.id !== id));
+    }
+  };
+
+  // --- データの加工 (ロジックは維持) ---
   const itemsByShop = shops
     .map((shop) => ({
       ...shop,
-      items: shoppingList.filter((item) => item.shopId === shop.id),
+      items: shoppingList.filter((item) => item.shop_id === shop.id), // shop_id に修正
     }))
-    .filter((shop) => shop.items.length > 0 || searchTerm === ""); // 検索中以外は空の店舗も表示
+    .filter((shop) => shop.items.length > 0 || searchTerm === "");
 
-  // 2. 商品別にグループ化（底値比較用）
   const productGroups = new Map();
   shoppingList.forEach((item) => {
     const key = `${item.name}-${item.brand || ""}`;
@@ -58,24 +82,24 @@ export default function MasterPage() {
         stores: [],
       });
     }
-    const shopInfo = shops.find((s) => s.id === item.shopId);
+    const shopInfo = shops.find((s) => s.id === item.shop_id); // shop_id に修正
     productGroups
       .get(key)
       .stores.push({ ...item, shopName: shopInfo?.name || "不明" });
   });
+
   const itemsByProduct = Array.from(productGroups.values()).map((g) => ({
     ...g,
     stores: g.stores.sort((a: any, b: any) => a.price - b.price),
   }));
 
-  // フィルタリング
   const filteredShops = itemsByShop.filter((s) => s.name.includes(searchTerm));
   const filteredProducts = itemsByProduct.filter(
     (p) => p.name.includes(searchTerm) || p.brand?.includes(searchTerm)
   );
 
   return (
-    <main className="min-h-screen bg-gray-50 pb-20 text-black">
+    <main className="min-h-screen bg-gray-50 pb-20 text-black font-sans">
       <header className="bg-white px-4 pt-4 pb-2 shadow-sm sticky top-0 z-20">
         <div className="flex items-center gap-4 mb-4">
           <button onClick={() => router.back()} className="text-gray-400 p-1">
@@ -86,7 +110,6 @@ export default function MasterPage() {
           </h1>
         </div>
 
-        {/* タブ切り替え */}
         <div className="flex bg-gray-100 p-1 rounded-2xl mb-4">
           <button
             onClick={() => setViewMode("shop")}
@@ -127,8 +150,11 @@ export default function MasterPage() {
       </header>
 
       <div className="p-4">
-        {viewMode === "shop" ? (
-          /* 店舗別リスト表示 */
+        {loading ? (
+          <div className="text-center py-20">
+            <Loader2 className="animate-spin mx-auto text-gray-300" size={32} />
+          </div>
+        ) : viewMode === "shop" ? (
           <div className="space-y-6">
             {filteredShops.map((shop) => (
               <div key={shop.id} className="space-y-3">
@@ -153,10 +179,7 @@ export default function MasterPage() {
                         </div>
                         <div className="font-bold text-sm">{item.name}</div>
                         <div className="text-lg font-black mt-1">
-                          ¥{item.price.toLocaleString()}
-                          <span className="text-[10px] text-gray-400 ml-1">
-                            税抜
-                          </span>
+                          ¥{Number(item.price).toLocaleString()}
                         </div>
                       </div>
                       <div className="flex gap-1">
@@ -164,13 +187,13 @@ export default function MasterPage() {
                           onClick={() =>
                             router.push(`/add-product?editId=${item.id}`)
                           }
-                          className="p-2 text-gray-400 hover:text-blue-500"
+                          className="p-2 text-gray-400"
                         >
                           <Edit3 size={18} />
                         </button>
                         <button
                           onClick={() => deleteItem(item.id)}
-                          className="p-2 text-gray-300 hover:text-red-500"
+                          className="p-2 text-gray-300"
                         >
                           <Trash2 size={18} />
                         </button>
@@ -182,7 +205,6 @@ export default function MasterPage() {
             ))}
           </div>
         ) : (
-          /* 商品別リスト表示（底値比較） */
           <div className="space-y-6">
             {filteredProducts.map((group, idx) => (
               <div key={idx} className="space-y-3">
@@ -219,7 +241,7 @@ export default function MasterPage() {
                             {item.shopName}
                           </div>
                           <div className="font-black text-base">
-                            ¥{item.price.toLocaleString()}
+                            ¥{Number(item.price).toLocaleString()}
                           </div>
                         </div>
                       </div>
