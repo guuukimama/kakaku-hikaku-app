@@ -2,28 +2,41 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Store, MapPin } from "lucide-react";
+import { supabase } from "@/lib/supabase"; // Supabaseをインポート
+import { ArrowLeft, Store, MapPin, Loader2 } from "lucide-react";
 
 export default function AddShopPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false); // 保存中状態
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name) return alert("店舗名を入力してください");
 
-    const data = localStorage.getItem("shop-master");
-    const shops = data ? JSON.parse(data) : [];
+    setIsSubmitting(true);
 
-    const newShop = {
-      id: Date.now().toString(),
-      name,
-      location,
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      // 【重要】localStorageをやめてSupabaseに挿入
+      const { error } = await supabase.from("shops").insert([
+        {
+          name: name,
+          location: location,
+        },
+      ]);
 
-    localStorage.setItem("shop-master", JSON.stringify([...shops, newShop]));
-    router.back(); // 前の画面に戻る（商品登録中なら商品登録へ）
+      if (error) {
+        throw error;
+      }
+
+      // 成功したら一覧に戻る
+      router.push("/shop-master");
+      router.refresh();
+    } catch (error: any) {
+      alert("DB保存エラー: " + error.message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -66,9 +79,19 @@ export default function AddShopPage() {
 
         <button
           onClick={handleSave}
-          className="w-full bg-blue-600 text-white py-4 rounded-[24px] font-black text-lg shadow-lg shadow-blue-100 active:scale-95 transition-all mt-4"
+          disabled={isSubmitting}
+          className={`w-full bg-blue-600 text-white py-4 rounded-[24px] font-black text-lg shadow-lg shadow-blue-100 active:scale-95 transition-all mt-4 flex justify-center items-center gap-2 ${
+            isSubmitting ? "opacity-70" : ""
+          }`}
         >
-          店舗マスタに保存
+          {isSubmitting ? (
+            <>
+              <Loader2 className="animate-spin" size={20} />
+              保存中...
+            </>
+          ) : (
+            "店舗マスタに保存"
+          )}
         </button>
       </div>
     </main>

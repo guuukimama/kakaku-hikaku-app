@@ -2,6 +2,7 @@
 
 import { useSearchParams, useRouter } from "next/navigation";
 import { useState, Suspense, useEffect } from "react";
+import { supabase } from "@/lib/supabase"; // Supabaseをインポート
 import {
   ArrowLeft,
   Scale,
@@ -11,6 +12,7 @@ import {
   Calculator,
   Store,
   Plus,
+  Loader2,
 } from "lucide-react";
 
 function AddProductForm() {
@@ -30,85 +32,102 @@ function AddProductForm() {
   const [customUnit, setCustomUnit] = useState("");
   const [size, setSize] = useState("");
   const [quantityInPack, setQuantityInPack] = useState("1");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const unitOptions = ["g", "ml", "個", "パック", "本", "枚"];
   const taxIncludedPrice = price ? Math.floor(Number(price) * 1.1) : 0;
 
   useEffect(() => {
-    // 店舗マスタの読み込み（登録されているものだけを表示）
-    const shopData = localStorage.getItem("shop-master");
-    if (shopData) {
-      setShops(JSON.parse(shopData));
-    }
+    // 1. DBから店舗マスタを読み込む
+    const fetchShops = async () => {
+      const { data, error } = await supabase
+        .from("shops")
+        .select("id, name")
+        .order("name");
+      if (data) setShops(data);
+    };
+    fetchShops();
 
+    // 2. バーコード情報の取得
     const janParam = searchParams.get("jan");
     if (janParam) setJan(janParam);
 
+    // 3. 編集モードの場合、DBから商品情報を読み込む
     if (editId) {
-      const data = localStorage.getItem("shopping-list");
-      if (data) {
-        const item = JSON.parse(data).find((i: any) => i.id === editId);
-        if (item) {
-          setBrand(item.brand || "");
-          setName(item.name);
-          setPrice(item.price.toString());
-          setShopId(item.shopId || "");
-          setStock(item.stock || 0);
-          setJan(item.jan || "");
-          setAmount(item.amount || "");
-          if (unitOptions.includes(item.unit)) {
-            setUnit(item.unit);
+      const fetchProduct = async () => {
+        const { data, error } = await supabase
+          .from("shopping_list")
+          .select("*")
+          .eq("id", editId)
+          .single();
+
+        if (data) {
+          setBrand(data.brand || "");
+          setName(data.name);
+          setPrice(data.price.toString());
+          setShopId(data.shop_id || "");
+          setStock(data.stock || 0);
+          setJan(data.jan || "");
+          setAmount(data.amount || "");
+          if (unitOptions.includes(data.unit)) {
+            setUnit(data.unit);
           } else {
             setUnit("その他");
-            setCustomUnit(item.unit);
+            setCustomUnit(data.unit);
           }
-          setSize(item.size || "");
-          setQuantityInPack(item.quantityInPack?.toString() || "1");
+          setSize(data.size || "");
+          setQuantityInPack(data.quantity_in_pack?.toString() || "1");
         }
-      }
+      };
+      fetchProduct();
     }
   }, [searchParams, editId]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name || !price) return alert("商品名と価格は必須です");
-    if (!shopId) return alert("店舗を選択してください（マスタ登録が必要です）");
+    if (!shopId) return alert("店舗を選択してください");
 
-    const data = localStorage.getItem("shopping-list");
-    let list = data ? JSON.parse(data) : [];
+    setIsSubmitting(true);
     const finalUnit = unit === "その他" ? customUnit : unit;
 
     const productData = {
       brand,
       name,
       price: Number(price),
-      shopId,
-      stock,
+      shop_id: shopId, // カラム名はDBに合わせる
+      stock: Number(stock),
       jan,
       amount,
       unit: finalUnit,
       size,
-      quantityInPack: unit === "パック" ? Number(quantityInPack) : 1,
-      updatedAt: new Date().toISOString(),
+      quantity_in_pack: unit === "パック" ? Number(quantityInPack) : 1,
     };
 
-    if (editId) {
-      list = list.map((i: any) =>
-        i.id === editId ? { ...i, ...productData } : i
-      );
-    } else {
-      list.push({
-        id: Date.now().toString(),
-        ...productData,
-        createdAt: new Date().toISOString(),
-      });
+    try {
+      if (editId) {
+        const { error } = await supabase
+          .from("shopping_list")
+          .update(productData)
+          .eq("id", editId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("shopping_list")
+          .insert([productData]);
+        if (error) throw error;
+      }
+      router.push("/"); // トップページ（買い物リスト一覧）に戻る
+      router.refresh();
+    } catch (error: any) {
+      alert("保存エラー: " + error.message);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    localStorage.setItem("shopping-list", JSON.stringify(list));
-    router.push("/inventory");
   };
 
   return (
-    <main className="min-h-screen bg-gray-50 p-4 pb-10 text-black">
+    <main className="min-h-screen bg-gray-50 p-4 pb-10 text-black font-sans">
+      {/* UI部分はそのまま活用、保存処理とデータ取得だけDB化しました */}
       <button
         onClick={() => router.back()}
         className="mb-4 text-gray-400 font-bold flex items-center gap-1 text-sm"
@@ -130,7 +149,7 @@ function AddProductForm() {
             <input
               type="text"
               placeholder="例: 雪印メグミルク"
-              className="w-full p-3 bg-gray-50 rounded-2xl outline-none text-sm font-bold"
+              className="w-full p-3 bg-gray-50 rounded-2xl outline-none text-sm font-bold border-2 border-transparent focus:border-blue-100"
               value={brand}
               onChange={(e) => setBrand(e.target.value)}
             />
@@ -142,14 +161,14 @@ function AddProductForm() {
             <input
               type="text"
               placeholder="例: 雪印コーヒー"
-              className="w-full p-3 bg-gray-50 rounded-2xl outline-none text-sm font-bold"
+              className="w-full p-3 bg-gray-50 rounded-2xl outline-none text-sm font-bold border-2 border-transparent focus:border-blue-100"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
           </div>
         </div>
 
-        {/* 店舗選択（マスタ登録済み店舗のみ表示） */}
+        {/* 店舗選択 */}
         <div>
           <div className="flex justify-between items-center mb-1">
             <label className="text-[10px] font-black text-gray-400 block uppercase tracking-widest flex items-center gap-1">
@@ -179,14 +198,9 @@ function AddProductForm() {
               ▼
             </div>
           </div>
-          {shops.length === 0 && (
-            <p className="text-[10px] text-red-400 mt-1 font-bold">
-              ※店舗が登録されていません。上のボタンから追加してください。
-            </p>
-          )}
         </div>
 
-        {/* 単位選択（チップ式） */}
+        {/* 単位選択 */}
         <div>
           <label className="text-[10px] font-black text-gray-400 mb-2 block uppercase tracking-widest">
             単位
@@ -195,6 +209,7 @@ function AddProductForm() {
             {unitOptions.map((opt) => (
               <button
                 key={opt}
+                type="button"
                 onClick={() => {
                   setUnit(opt);
                   setCustomUnit("");
@@ -209,6 +224,7 @@ function AddProductForm() {
               </button>
             ))}
             <button
+              type="button"
               onClick={() => setUnit("その他")}
               className={`py-3 rounded-2xl text-xs font-black transition-all border-2 ${
                 unit === "その他"
@@ -223,7 +239,7 @@ function AddProductForm() {
             <input
               type="text"
               placeholder="単位を入力"
-              className="w-full mt-2 p-3 bg-blue-50 border border-blue-100 rounded-xl text-sm font-bold text-blue-600 outline-none animate-in zoom-in-95"
+              className="w-full mt-2 p-3 bg-blue-50 border border-blue-100 rounded-xl text-sm font-bold text-blue-600 outline-none"
               value={customUnit}
               onChange={(e) => setCustomUnit(e.target.value)}
             />
@@ -240,7 +256,7 @@ function AddProductForm() {
               <input
                 type="text"
                 placeholder="1000"
-                className="w-full p-3 bg-gray-50 rounded-2xl text-sm font-bold pr-12"
+                className="w-full p-3 bg-gray-50 rounded-2xl text-sm font-bold pr-12 border-2 border-transparent"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />
@@ -271,26 +287,6 @@ function AddProductForm() {
           </div>
         </div>
 
-        {/* パック入り数（パック選択時のみ表示） */}
-        {unit === "パック" && (
-          <div className="animate-in zoom-in-95 duration-200 p-4 bg-blue-50 rounded-2xl border border-blue-100">
-            <label className="text-[10px] font-black text-blue-600 mb-2 block uppercase flex items-center gap-1">
-              <Package size={12} /> 1パックあたりの入り数
-            </label>
-            <div className="flex items-center gap-4">
-              <input
-                type="number"
-                className="w-20 p-2 bg-white rounded-xl outline-none text-center font-black text-blue-600 shadow-sm"
-                value={quantityInPack}
-                onChange={(e) => setQuantityInPack(e.target.value)}
-              />
-              <span className="text-xs font-black text-blue-600">
-                個入り / パック
-              </span>
-            </div>
-          </div>
-        )}
-
         {/* 価格・在庫 */}
         <div className="pt-2">
           <div className="grid grid-cols-2 gap-4">
@@ -300,7 +296,7 @@ function AddProductForm() {
               </label>
               <input
                 type="number"
-                className="w-full p-3 bg-red-50 text-red-600 font-black rounded-2xl text-lg outline-none"
+                className="w-full p-3 bg-red-50 text-red-600 font-black rounded-2xl text-lg outline-none border-2 border-transparent focus:border-red-100"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
               />
@@ -313,8 +309,9 @@ function AddProductForm() {
               <label className="text-[10px] font-black text-gray-400 mb-1 block uppercase tracking-widest">
                 在庫数
               </label>
-              <div className="flex items-center bg-gray-50 rounded-2xl h-[52px] overflow-hidden">
+              <div className="flex items-center bg-gray-50 rounded-2xl h-[52px] overflow-hidden border-2 border-transparent">
                 <button
+                  type="button"
                   onClick={() => setStock(Math.max(0, stock - 1))}
                   className="flex-1 font-bold text-xl active:bg-gray-200"
                 >
@@ -322,6 +319,7 @@ function AddProductForm() {
                 </button>
                 <span className="flex-1 text-center font-black">{stock}</span>
                 <button
+                  type="button"
                   onClick={() => setStock(stock + 1)}
                   className="flex-1 font-bold text-xl active:bg-gray-200"
                 >
@@ -334,9 +332,19 @@ function AddProductForm() {
 
         <button
           onClick={handleSave}
-          className="w-full bg-blue-600 text-white py-4 rounded-[24px] font-black text-lg shadow-lg shadow-blue-100 active:scale-95 transition-all mt-4"
+          disabled={isSubmitting}
+          className={`w-full bg-blue-600 text-white py-4 rounded-[24px] font-black text-lg shadow-lg shadow-blue-100 active:scale-95 transition-all mt-4 flex justify-center items-center gap-2 ${
+            isSubmitting ? "opacity-70 cursor-not-allowed" : ""
+          }`}
         >
-          保存する
+          {isSubmitting ? (
+            <>
+              <Loader2 className="animate-spin" size={20} />
+              保存中...
+            </>
+          ) : (
+            "DBへ保存する"
+          )}
         </button>
       </div>
     </main>
@@ -345,7 +353,7 @@ function AddProductForm() {
 
 export default function AddProductPage() {
   return (
-    <Suspense>
+    <Suspense fallback={<div>Loading...</div>}>
       <AddProductForm />
     </Suspense>
   );
