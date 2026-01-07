@@ -248,7 +248,7 @@ export default function ShoppingListPage() {
                               ¥{(item.price || 0).toLocaleString()}
                             </span>
                             <span className="ml-2 text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold">
-                              家: {item.stock}
+                              在庫: {item.stock}
                             </span>
                           </div>
                         </div>
