@@ -104,27 +104,32 @@ function HomeContent() {
     }
   };
 
-  // 検索フィルタリング（変更なし）
+  // --- 修正箇所：検索フィルタリング ---
   const filtered =
     searchTerm.trim() === ""
       ? []
       : items.filter((i) => {
           const name = i.name.toLowerCase();
           const brand = (i.brand || "").toLowerCase();
-          const targetText = name + brand;
+          const jan = (i.jan || "").toLowerCase(); // ★ JANコードを取得
+
           const query = searchTerm.toLowerCase();
+
+          // ★ jan.includes(query) を追加することで、JANコード検索に対応
           if (
-            targetText.includes(query) ||
-            toKatakana(targetText).includes(toKatakana(query))
+            name.includes(query) ||
+            brand.includes(query) ||
+            jan.includes(query) || // ← ここを追加！
+            toKatakana(name + brand).includes(toKatakana(query))
           )
             return true;
+
           for (const [key, value] of Object.entries(synonymMap)) {
-            if (query.includes(key) && targetText.includes(value)) return true;
-            if (query.includes(value) && targetText.includes(key)) return true;
+            if (query.includes(key) && name.includes(value)) return true;
+            if (query.includes(value) && name.includes(key)) return true;
           }
           return false;
         });
-
   // 商品ごとにグルーピング & 単価計算（変更なし）
   const grouped: { [key: string]: any[] } = {};
   filtered.forEach((item) => {

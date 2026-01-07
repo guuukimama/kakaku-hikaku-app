@@ -14,8 +14,8 @@ import {
   Plus,
   Loader2,
   Hash,
-  Camera, // 追加
-  Barcode, // 追加
+  Camera,
+  Barcode,
 } from "lucide-react";
 
 function AddProductForm() {
@@ -50,9 +50,38 @@ function AddProductForm() {
     };
     fetchShops();
 
-    // ★ URLパラメータにjanがあればセット
+    // --- ここからJANコード反映ロジック ---
     const janParam = searchParams.get("jan");
-    if (janParam) setJan(janParam);
+    if (janParam) {
+      setJan(janParam);
+
+      // 新規登録時のみ、スキャンしたJANコードから既存の商品情報を探して自動入力（補助機能）
+      if (!editId) {
+        const fetchExistingInfo = async () => {
+          const { data } = await supabase
+            .from("shopping_list")
+            .select("*")
+            .eq("jan", janParam)
+            .limit(1)
+            .maybeSingle();
+
+          if (data) {
+            // 他の店舗ですでに登録があれば、名前やブランドを自動セット
+            setName((prev) => prev || data.name);
+            setBrand((prev) => prev || data.brand || "");
+            setAmount((prev) => prev || data.amount || "");
+            if (unitOptions.includes(data.unit)) {
+              setUnit(data.unit);
+            } else {
+              setUnit("その他");
+              setCustomUnit(data.unit);
+            }
+          }
+        };
+        fetchExistingInfo();
+      }
+    }
+    // --- ここまで ---
 
     if (editId) {
       const fetchProduct = async () => {
@@ -97,7 +126,7 @@ function AddProductForm() {
       price: Number(price),
       shop_id: shopId,
       stock: Number(stock),
-      jan, // ★ JANコードを保存対象に含める
+      jan,
       amount,
       unit: finalUnit,
       size,
@@ -145,7 +174,6 @@ function AddProductForm() {
       </h1>
 
       <div className="space-y-6 bg-white p-6 rounded-[32px] shadow-sm border border-gray-100">
-        {/* ★ JANコード入力セクションを追加 */}
         <div>
           <label className="text-[10px] font-black text-gray-400 mb-1 block uppercase tracking-widest flex items-center gap-1">
             <Barcode size={12} /> JANコード（バーコード）
@@ -160,6 +188,7 @@ function AddProductForm() {
             />
             <button
               type="button"
+              // スキャン画面へ移動（mode=addを付与）
               onClick={() => router.push("/scan?mode=add")}
               className="bg-blue-600 text-white p-3 rounded-2xl shadow-md shadow-blue-100 active:scale-95 transition-transform"
             >
@@ -167,6 +196,10 @@ function AddProductForm() {
             </button>
           </div>
         </div>
+        {/* ... (以下のブランド・店舗・単位等の入力項目は元のコードと同じ) */}
+
+        {/* (省略: ブランド、商品名、店舗選択、単位、内容量、サイズ、価格、在庫数、保存ボタンのJSX) */}
+        {/* ... 前回のコードからそのまま引き継いでください ... */}
 
         <div className="space-y-4">
           <div>
