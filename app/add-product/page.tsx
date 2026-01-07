@@ -28,7 +28,7 @@ function AddProductForm() {
   const [price, setPrice] = useState("");
   const [shopId, setShopId] = useState("");
   const [shops, setShops] = useState<{ id: string; name: string }[]>([]);
-  const [stock, setStock] = useState(1);
+  const [stock, setStock] = useState(0);
   const [jan, setJan] = useState("");
   const [amount, setAmount] = useState("");
   const [unit, setUnit] = useState("g");
