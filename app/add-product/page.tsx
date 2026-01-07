@@ -2,7 +2,7 @@
 
 import { useSearchParams, useRouter } from "next/navigation";
 import { useState, Suspense, useEffect } from "react";
-import { supabase } from "@/lib/supabase"; // Supabaseをインポート
+import { supabase } from "@/lib/supabase";
 import {
   ArrowLeft,
   Scale,
@@ -13,6 +13,7 @@ import {
   Store,
   Plus,
   Loader2,
+  Hash, // 追加
 } from "lucide-react";
 
 function AddProductForm() {
@@ -31,16 +32,15 @@ function AddProductForm() {
   const [unit, setUnit] = useState("g");
   const [customUnit, setCustomUnit] = useState("");
   const [size, setSize] = useState("");
-  const [quantityInPack, setQuantityInPack] = useState("1");
+  const [quantityInPack, setQuantityInPack] = useState("1"); // デフォルト1
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const unitOptions = ["g", "ml", "個", "パック", "本", "枚"];
   const taxIncludedPrice = price ? Math.floor(Number(price) * 1.1) : 0;
 
   useEffect(() => {
-    // 1. DBから店舗マスタを読み込む
     const fetchShops = async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("shops")
         .select("id, name")
         .order("name");
@@ -48,14 +48,12 @@ function AddProductForm() {
     };
     fetchShops();
 
-    // 2. バーコード情報の取得
     const janParam = searchParams.get("jan");
     if (janParam) setJan(janParam);
 
-    // 3. 編集モードの場合、DBから商品情報を読み込む
     if (editId) {
       const fetchProduct = async () => {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from("shopping_list")
           .select("*")
           .eq("id", editId)
@@ -90,18 +88,23 @@ function AddProductForm() {
     setIsSubmitting(true);
     const finalUnit = unit === "その他" ? customUnit : unit;
 
-    const productData = {
+    const productData: any = {
       brand,
       name,
       price: Number(price),
-      shop_id: shopId, // カラム名はDBに合わせる
+      shop_id: shopId,
       stock: Number(stock),
       jan,
       amount,
       unit: finalUnit,
       size,
+      // パック以外の場合は1、パックの場合は入力値を保存
       quantity_in_pack: unit === "パック" ? Number(quantityInPack) : 1,
     };
+
+    if (!editId) {
+      productData.is_visible = false;
+    }
 
     try {
       if (editId) {
@@ -116,7 +119,8 @@ function AddProductForm() {
           .insert([productData]);
         if (error) throw error;
       }
-      router.push("/"); // トップページ（買い物リスト一覧）に戻る
+
+      router.push("/master");
       router.refresh();
     } catch (error: any) {
       alert("保存エラー: " + error.message);
@@ -127,7 +131,6 @@ function AddProductForm() {
 
   return (
     <main className="min-h-screen bg-gray-50 p-4 pb-10 text-black font-sans">
-      {/* UI部分はそのまま活用、保存処理とデータ取得だけDB化しました */}
       <button
         onClick={() => router.back()}
         className="mb-4 text-gray-400 font-bold flex items-center gap-1 text-sm"
@@ -140,7 +143,6 @@ function AddProductForm() {
       </h1>
 
       <div className="space-y-6 bg-white p-6 rounded-[32px] shadow-sm border border-gray-100">
-        {/* 基本情報 */}
         <div className="space-y-4">
           <div>
             <label className="text-[10px] font-black text-gray-400 mb-1 block uppercase tracking-widest flex items-center gap-1">
@@ -168,7 +170,6 @@ function AddProductForm() {
           </div>
         </div>
 
-        {/* 店舗選択 */}
         <div>
           <div className="flex justify-between items-center mb-1">
             <label className="text-[10px] font-black text-gray-400 block uppercase tracking-widest flex items-center gap-1">
@@ -200,7 +201,6 @@ function AddProductForm() {
           </div>
         </div>
 
-        {/* 単位選択 */}
         <div>
           <label className="text-[10px] font-black text-gray-400 mb-2 block uppercase tracking-widest">
             単位
@@ -246,7 +246,6 @@ function AddProductForm() {
           )}
         </div>
 
-        {/* 内容量・サイズ */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-[10px] font-black text-gray-400 mb-1 block uppercase tracking-widest flex items-center gap-1">
@@ -287,7 +286,27 @@ function AddProductForm() {
           </div>
         </div>
 
-        {/* 価格・在庫 */}
+        {/* ★ パックの数量入力 (条件付き表示) */}
+        {unit === "パック" && (
+          <div className="bg-blue-50 p-4 rounded-3xl border border-blue-100 animate-in fade-in slide-in-from-top-2">
+            <label className="text-[10px] font-black text-blue-600 mb-2 block uppercase tracking-widest flex items-center gap-1">
+              <Hash size={12} /> 1パックあたりの数量
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                placeholder="例: 10"
+                className="w-full p-3 bg-white rounded-2xl text-sm font-bold text-blue-600 outline-none border-2 border-transparent focus:border-blue-200"
+                value={quantityInPack}
+                onChange={(e) => setQuantityInPack(e.target.value)}
+              />
+              <span className="text-sm font-black text-blue-400 shrink-0">
+                個/枚 入
+              </span>
+            </div>
+          </div>
+        )}
+
         <div className="pt-2">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -343,7 +362,7 @@ function AddProductForm() {
               保存中...
             </>
           ) : (
-            "DBへ保存する"
+            "マスタに登録する"
           )}
         </button>
       </div>

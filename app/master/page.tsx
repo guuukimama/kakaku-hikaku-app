@@ -15,6 +15,7 @@ import {
   Loader2,
   Plus,
   Minus,
+  Eye, // 復活用のアイコン
 } from "lucide-react";
 
 export default function MasterPage() {
@@ -25,7 +26,6 @@ export default function MasterPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const router = useRouter();
 
-  // DBから全データを読み込む
   const loadAllData = async () => {
     const [shopsRes, productsRes] = await Promise.all([
       supabase.from("shops").select("*").order("name"),
@@ -43,14 +43,13 @@ export default function MasterPage() {
     setLoading(true);
     loadAllData().finally(() => setLoading(false));
 
-    // ★ リアルタイム同期設定
     const channel = supabase
       .channel("master-realtime")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "shopping_list" },
         () => {
-          loadAllData(); // 変更があったら再読み込み
+          loadAllData();
         }
       )
       .subscribe();
@@ -60,7 +59,24 @@ export default function MasterPage() {
     };
   }, []);
 
-  // ★ 在庫をその場で更新する関数
+  // ★ 在庫リストに復活させる関数
+  const showItem = async (id: string, name: string) => {
+    const { error } = await supabase
+      .from("shopping_list")
+      .update({ is_visible: true })
+      .eq("id", id);
+
+    if (error) {
+      alert("復活に失敗しました");
+    } else {
+      setShoppingList((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, is_visible: true } : item
+        )
+      );
+    }
+  };
+
   const handleUpdateStock = async (
     id: string,
     currentStock: number,
@@ -75,7 +91,6 @@ export default function MasterPage() {
     if (error) {
       alert("在庫の更新に失敗しました");
     } else {
-      // ローカル状態を即時更新して体感速度を上げる
       setShoppingList((prev) =>
         prev.map((item) =>
           item.id === id ? { ...item, stock: newStock } : item
@@ -85,7 +100,8 @@ export default function MasterPage() {
   };
 
   const deleteItem = async (id: string) => {
-    if (!confirm("このデータを削除しますか？")) return;
+    if (!confirm("このデータを完全に削除しますか？\n(復活できなくなります)"))
+      return;
     const { error } = await supabase
       .from("shopping_list")
       .delete()
@@ -93,7 +109,7 @@ export default function MasterPage() {
     if (!error) setShoppingList(shoppingList.filter((i: any) => i.id !== id));
   };
 
-  // データの加工ロジック
+  // フィルタリングロジック
   const itemsByShop = shops
     .map((shop) => ({
       ...shop,
@@ -110,8 +126,8 @@ export default function MasterPage() {
         brand: item.brand,
         unit: item.unit,
         amount: item.amount,
-        stock: item.stock, // 代表在庫
-        id: item.id, // 代表ID
+        stock: item.stock,
+        id: item.id,
         stores: [],
       });
     }
@@ -201,10 +217,19 @@ export default function MasterPage() {
                   {shop.items.map((item: any) => (
                     <div
                       key={item.id}
-                      className="bg-white p-4 rounded-[24px] shadow-sm border border-gray-100"
+                      className={`p-4 rounded-[24px] shadow-sm border transition-colors ${
+                        item.is_visible
+                          ? "bg-white border-gray-100"
+                          : "bg-orange-50/40 border-dashed border-orange-200"
+                      }`}
                     >
                       <div className="flex justify-between items-start mb-3">
                         <div>
+                          {!item.is_visible && (
+                            <span className="text-[9px] font-black bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full mb-1 inline-block">
+                              在庫リスト非表示中
+                            </span>
+                          )}
                           <div className="text-[10px] font-black text-blue-500 uppercase">
                             {item.brand}
                           </div>
@@ -214,6 +239,15 @@ export default function MasterPage() {
                           </div>
                         </div>
                         <div className="flex gap-1">
+                          {/* ★ 復活ボタン */}
+                          {!item.is_visible && (
+                            <button
+                              onClick={() => showItem(item.id, item.name)}
+                              className="p-2 text-orange-600 bg-white rounded-full shadow-sm border border-orange-100 active:scale-90"
+                            >
+                              <Eye size={18} />
+                            </button>
+                          )}
                           <button
                             onClick={() =>
                               router.push(`/add-product?editId=${item.id}`)
@@ -230,8 +264,7 @@ export default function MasterPage() {
                           </button>
                         </div>
                       </div>
-                      {/* 在庫操作バー */}
-                      <div className="flex items-center justify-between bg-gray-50 rounded-xl p-2 px-4">
+                      <div className="flex items-center justify-between bg-gray-50/80 rounded-xl p-2 px-4">
                         <span className="text-xs font-bold text-gray-400">
                           在庫:{" "}
                           <span className="text-blue-600 text-sm">
@@ -243,7 +276,7 @@ export default function MasterPage() {
                             onClick={() =>
                               handleUpdateStock(item.id, item.stock ?? 0, -1)
                             }
-                            className="p-1 text-gray-500 active:scale-90"
+                            className="p-1 text-gray-500"
                           >
                             <Minus size={18} />
                           </button>
@@ -251,7 +284,7 @@ export default function MasterPage() {
                             onClick={() =>
                               handleUpdateStock(item.id, item.stock ?? 0, 1)
                             }
-                            className="p-1 text-blue-600 active:scale-90"
+                            className="p-1 text-blue-600"
                           >
                             <Plus size={18} />
                           </button>
@@ -287,36 +320,47 @@ export default function MasterPage() {
                       key={item.id}
                       className={`p-4 flex flex-col gap-3 ${
                         sIdx !== 0 ? "border-t border-gray-50" : ""
-                      }`}
+                      } ${!item.is_visible ? "bg-orange-50/20" : ""}`}
                     >
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-3">
                           <div
                             className={`w-2 h-2 rounded-full ${
-                              sIdx === 0
+                              !item.is_visible
+                                ? "bg-orange-300"
+                                : sIdx === 0
                                 ? "bg-amber-400 animate-pulse"
                                 : "bg-gray-200"
                             }`}
                           />
                           <div>
                             <div className="text-[10px] font-black text-gray-400">
-                              {item.shopName}
+                              {item.shopName} {!item.is_visible && "(非表示中)"}
                             </div>
                             <div className="font-black text-base">
                               ¥{Number(item.price).toLocaleString()}
                             </div>
                           </div>
                         </div>
-                        <button
-                          onClick={() =>
-                            router.push(`/add-product?editId=${item.id}`)
-                          }
-                          className="p-2 text-gray-400"
-                        >
-                          <ChevronRight size={18} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          {!item.is_visible && (
+                            <button
+                              onClick={() => showItem(item.id, item.name)}
+                              className="p-2 text-orange-600"
+                            >
+                              <Eye size={18} />
+                            </button>
+                          )}
+                          <button
+                            onClick={() =>
+                              router.push(`/add-product?editId=${item.id}`)
+                            }
+                            className="p-2 text-gray-400"
+                          >
+                            <ChevronRight size={18} />
+                          </button>
+                        </div>
                       </div>
-                      {/* 在庫操作バー（商品ごとモード） */}
                       <div className="flex items-center justify-between bg-gray-50 rounded-xl p-2 px-4">
                         <span className="text-xs font-bold text-gray-400">
                           在庫:{" "}

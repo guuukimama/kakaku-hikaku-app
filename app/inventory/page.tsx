@@ -14,7 +14,7 @@ import {
   Store,
   Loader2,
   MapPin,
-  Trash2,
+  EyeOff, // 非表示アイコン
   ShoppingCart,
 } from "lucide-react";
 
@@ -22,10 +22,12 @@ export default function InventoryPage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // 1. データの読み込み（is_visible が true のものだけ）
   const loadData = async () => {
     const { data, error } = await supabase
       .from("shopping_list")
       .select(`*, shops ( name )`)
+      .eq("is_visible", true) // ★ 表示設定がONのものだけ取得
       .order("created_at", { ascending: false });
 
     if (data) {
@@ -46,9 +48,7 @@ export default function InventoryPage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "shopping_list" },
-        () => {
-          loadData();
-        }
+        () => loadData()
       )
       .subscribe();
 
@@ -57,84 +57,79 @@ export default function InventoryPage() {
     };
   }, []);
 
-  // ★ 買い物リストへの追加（重複防止ロジック付き）
-  const addToCart = async (item: any) => {
-    try {
-      // 1. すでにカートに同じ商品（名前と店舗IDが一致）があるか確認
-      const { data: existingItem } = await supabase
-        .from("cart_items")
-        .select("id, checked")
-        .eq("name", item.name)
-        .eq("shop_id", item.shop_id)
-        .maybeSingle();
+  // 2. ★ 非表示にする処理（DBは消さない）
+  const hideItem = async (itemId: string, itemName: string) => {
+    if (
+      !confirm(
+        `「${itemName}」を一覧から非表示にしますか？\n（データは削除されません）`
+      )
+    )
+      return;
 
-      if (existingItem) {
-        // 2. すでにある場合：チェックを外して「未完了」にするだけで新規追加はしない
-        if (existingItem.checked) {
-          await supabase
-            .from("cart_items")
-            .update({ checked: false })
-            .eq("id", existingItem.id);
-          alert(
-            `「${item.name}」は既にリストにありましたが、再度買うものとして更新しました`
-          );
-        } else {
-          alert(`「${item.name}」は既に買い物リストに入っています`);
-        }
-        return;
-      }
+    const { error } = await supabase
+      .from("shopping_list")
+      .update({ is_visible: false }) // フラグを更新
+      .eq("id", itemId);
 
-      // 3. まだない場合のみ、新規インサート
-      const { error } = await supabase.from("cart_items").insert([
-        {
-          name: item.name,
-          price: item.price,
-          amount: item.amount,
-          unit: item.unit,
-          shop_id: item.shop_id,
-          checked: false,
-          stock: item.stock || 0,
-        },
-      ]);
-
-      if (!error) {
-        alert(`「${item.name}」を買い物リストに追加しました`);
-      }
-    } catch (e) {
-      console.error("カート追加エラー:", e);
+    if (!error) {
+      // ローカル状態から即座に消す
+      setItems((prev) => prev.filter((item) => item.id !== itemId));
     }
   };
 
-  const deleteItem = async (itemId: string, itemName: string) => {
-    if (!confirm(`「${itemName}」を削除しますか？`)) return;
-    const { error } = await supabase
-      .from("shopping_list")
-      .delete()
-      .eq("id", itemId);
-    if (!error) setItems((prev) => prev.filter((item) => item.id !== itemId));
+  // --- 買い物リスト追加や在庫更新の関数はそのまま維持 ---
+  const addToCart = async (item: any) => {
+    const { data: existingItem } = await supabase
+      .from("cart_items")
+      .select("id, checked")
+      .eq("name", item.name)
+      .eq("shop_id", item.shop_id)
+      .maybeSingle();
+
+    if (existingItem) {
+      if (existingItem.checked) {
+        await supabase
+          .from("cart_items")
+          .update({ checked: false })
+          .eq("id", existingItem.id);
+        alert(`「${item.name}」を再度買うものとして更新しました`);
+      } else {
+        alert(`「${item.name}」は既に買い物リストに入っています`);
+      }
+      return;
+    }
+
+    await supabase.from("cart_items").insert([
+      {
+        name: item.name,
+        price: item.price,
+        amount: item.amount,
+        unit: item.unit,
+        shop_id: item.shop_id,
+        checked: false,
+        stock: item.stock || 0,
+      },
+    ]);
+    alert(`「${item.name}」をリストに追加しました`);
   };
 
   const updateStock = async (item: any, delta: number) => {
     const newStock = Math.max(0, (item.stock || 0) + delta);
-
     const { error } = await supabase
       .from("shopping_list")
       .update({ stock: newStock })
       .eq("id", item.id);
-
     if (!error) {
       setItems((prev) =>
         prev.map((i) => (i.id === item.id ? { ...i, stock: newStock } : i))
       );
-
       if (newStock === 0 && delta < 0) {
         if (
           confirm(
-            `在庫がなくなりました。「${item.name}」を買い物リストに追加しますか？`
+            `在庫切れです。「${item.name}」を買い物リストに追加しますか？`
           )
-        ) {
+        )
           addToCart(item);
-        }
       }
     }
   };
@@ -150,23 +145,16 @@ export default function InventoryPage() {
             底値ナビ
           </span>
         </Link>
-
         <div className="flex items-center gap-1">
-          <Link
-            href="/master"
-            className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
-          >
+          <Link href="/master" className="p-2 text-gray-400">
             <LayoutList size={22} />
           </Link>
-          <Link
-            href="/shop-master"
-            className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
-          >
+          <Link href="/shop-master" className="p-2 text-gray-400">
             <Store size={22} />
           </Link>
           <Link
             href="/add-product"
-            className="ml-1 bg-blue-600 text-white p-2 rounded-xl active:scale-90 transition-transform shadow-sm"
+            className="ml-1 bg-blue-600 text-white p-2 rounded-xl shadow-sm"
           >
             <Plus size={22} />
           </Link>
@@ -180,7 +168,7 @@ export default function InventoryPage() {
           </div>
         ) : items.length === 0 ? (
           <div className="text-center py-20 text-gray-400 font-bold italic">
-            商品はまだありません
+            表示できる商品はありません
           </div>
         ) : (
           items.map((item) => (
@@ -197,7 +185,7 @@ export default function InventoryPage() {
                 </div>
                 <button
                   onClick={() => addToCart(item)}
-                  className="text-gray-400 hover:text-blue-600 transition-colors active:scale-90"
+                  className="text-gray-400 hover:text-blue-600 active:scale-90 transition-all"
                 >
                   <ShoppingCart size={18} />
                 </button>
@@ -244,12 +232,13 @@ export default function InventoryPage() {
               </div>
 
               <div className="px-4 py-2 flex justify-end bg-white border-t border-gray-50/50">
+                {/* ★ 削除ではなく非表示ボタン */}
                 <button
-                  onClick={() => deleteItem(item.id, item.name)}
-                  className="flex items-center gap-1 text-[10px] font-bold text-gray-300 hover:text-red-400 transition-colors p-1"
+                  onClick={() => hideItem(item.id, item.name)}
+                  className="flex items-center gap-1 text-[10px] font-bold text-gray-300 hover:text-orange-400 transition-colors p-1"
                 >
-                  <Trash2 size={12} />
-                  削除
+                  <EyeOff size={12} />
+                  非表示にする
                 </button>
               </div>
             </div>
