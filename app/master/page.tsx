@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase"; // インポート追加
+import { supabase } from "@/lib/supabase";
 import {
   ArrowLeft,
   Edit3,
@@ -12,7 +12,9 @@ import {
   Store,
   Package,
   ChevronRight,
-  Loader2, // 読み込み中アイコン
+  Loader2,
+  Plus,
+  Minus,
 } from "lucide-react";
 
 export default function MasterPage() {
@@ -25,9 +27,6 @@ export default function MasterPage() {
 
   // DBから全データを読み込む
   const loadAllData = async () => {
-    setLoading(true);
-
-    // 店舗データと商品データを並列で取得
     const [shopsRes, productsRes] = await Promise.all([
       supabase.from("shops").select("*").order("name"),
       supabase
@@ -38,35 +37,67 @@ export default function MasterPage() {
 
     if (shopsRes.data) setShops(shopsRes.data);
     if (productsRes.data) setShoppingList(productsRes.data);
-
-    setLoading(false);
   };
 
   useEffect(() => {
-    loadAllData();
+    setLoading(true);
+    loadAllData().finally(() => setLoading(false));
+
+    // ★ リアルタイム同期設定
+    const channel = supabase
+      .channel("master-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "shopping_list" },
+        () => {
+          loadAllData(); // 変更があったら再読み込み
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  // 削除機能もDB連動に
+  // ★ 在庫をその場で更新する関数
+  const handleUpdateStock = async (
+    id: string,
+    currentStock: number,
+    diff: number
+  ) => {
+    const newStock = Math.max(0, currentStock + diff);
+    const { error } = await supabase
+      .from("shopping_list")
+      .update({ stock: newStock })
+      .eq("id", id);
+
+    if (error) {
+      alert("在庫の更新に失敗しました");
+    } else {
+      // ローカル状態を即時更新して体感速度を上げる
+      setShoppingList((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, stock: newStock } : item
+        )
+      );
+    }
+  };
+
   const deleteItem = async (id: string) => {
     if (!confirm("このデータを削除しますか？")) return;
-
     const { error } = await supabase
       .from("shopping_list")
       .delete()
       .eq("id", id);
-
-    if (error) {
-      alert("削除に失敗しました");
-    } else {
-      setShoppingList(shoppingList.filter((i: any) => i.id !== id));
-    }
+    if (!error) setShoppingList(shoppingList.filter((i: any) => i.id !== id));
   };
 
-  // --- データの加工 (ロジックは維持) ---
+  // データの加工ロジック
   const itemsByShop = shops
     .map((shop) => ({
       ...shop,
-      items: shoppingList.filter((item) => item.shop_id === shop.id), // shop_id に修正
+      items: shoppingList.filter((item) => item.shop_id === shop.id),
     }))
     .filter((shop) => shop.items.length > 0 || searchTerm === "");
 
@@ -79,10 +110,12 @@ export default function MasterPage() {
         brand: item.brand,
         unit: item.unit,
         amount: item.amount,
+        stock: item.stock, // 代表在庫
+        id: item.id, // 代表ID
         stores: [],
       });
     }
-    const shopInfo = shops.find((s) => s.id === item.shop_id); // shop_id に修正
+    const shopInfo = shops.find((s) => s.id === item.shop_id);
     productGroups
       .get(key)
       .stores.push({ ...item, shopName: shopInfo?.name || "不明" });
@@ -106,7 +139,7 @@ export default function MasterPage() {
             <ArrowLeft size={24} />
           </button>
           <h1 className="text-lg font-black flex-1 text-center pr-10">
-            マスタ・価格管理
+            マスタ・在庫管理
           </h1>
         </div>
 
@@ -163,40 +196,66 @@ export default function MasterPage() {
                     <Store size={16} />
                   </div>
                   <h3 className="font-black text-gray-800">{shop.name}</h3>
-                  <span className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
-                    {shop.items.length}件の商品
-                  </span>
                 </div>
                 <div className="grid gap-2">
                   {shop.items.map((item: any) => (
                     <div
                       key={item.id}
-                      className="bg-white p-4 rounded-[24px] shadow-sm border border-gray-100 flex justify-between items-center"
+                      className="bg-white p-4 rounded-[24px] shadow-sm border border-gray-100"
                     >
-                      <div>
-                        <div className="text-[10px] font-black text-blue-500">
-                          {item.brand}
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <div className="text-[10px] font-black text-blue-500 uppercase">
+                            {item.brand}
+                          </div>
+                          <div className="font-bold text-sm">{item.name}</div>
+                          <div className="text-lg font-black mt-1">
+                            ¥{Number(item.price).toLocaleString()}
+                          </div>
                         </div>
-                        <div className="font-bold text-sm">{item.name}</div>
-                        <div className="text-lg font-black mt-1">
-                          ¥{Number(item.price).toLocaleString()}
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() =>
+                              router.push(`/add-product?editId=${item.id}`)
+                            }
+                            className="p-2 text-gray-400"
+                          >
+                            <Edit3 size={18} />
+                          </button>
+                          <button
+                            onClick={() => deleteItem(item.id)}
+                            className="p-2 text-gray-300"
+                          >
+                            <Trash2 size={18} />
+                          </button>
                         </div>
                       </div>
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() =>
-                            router.push(`/add-product?editId=${item.id}`)
-                          }
-                          className="p-2 text-gray-400"
-                        >
-                          <Edit3 size={18} />
-                        </button>
-                        <button
-                          onClick={() => deleteItem(item.id)}
-                          className="p-2 text-gray-300"
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                      {/* 在庫操作バー */}
+                      <div className="flex items-center justify-between bg-gray-50 rounded-xl p-2 px-4">
+                        <span className="text-xs font-bold text-gray-400">
+                          在庫:{" "}
+                          <span className="text-blue-600 text-sm">
+                            {item.stock ?? 0}
+                          </span>
+                        </span>
+                        <div className="flex items-center gap-4">
+                          <button
+                            onClick={() =>
+                              handleUpdateStock(item.id, item.stock ?? 0, -1)
+                            }
+                            className="p-1 text-gray-500 active:scale-90"
+                          >
+                            <Minus size={18} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              handleUpdateStock(item.id, item.stock ?? 0, 1)
+                            }
+                            className="p-1 text-blue-600 active:scale-90"
+                          >
+                            <Plus size={18} />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -208,51 +267,82 @@ export default function MasterPage() {
           <div className="space-y-6">
             {filteredProducts.map((group, idx) => (
               <div key={idx} className="space-y-3">
-                <div className="px-2">
-                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">
-                    {group.brand || "ノーブランド"}
+                <div className="px-2 flex justify-between items-end">
+                  <div>
+                    <div className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">
+                      {group.brand || "ノーブランド"}
+                    </div>
+                    <h3 className="font-black text-gray-800 text-lg">
+                      {group.name}
+                    </h3>
+                    <p className="text-xs text-gray-400">
+                      {group.amount}
+                      {group.unit}
+                    </p>
                   </div>
-                  <h3 className="font-black text-gray-800 text-lg">
-                    {group.name}
-                  </h3>
-                  <p className="text-xs text-gray-400">
-                    {group.amount}
-                    {group.unit}
-                  </p>
                 </div>
                 <div className="bg-white rounded-[32px] overflow-hidden border border-gray-100 shadow-sm">
                   {group.stores.map((item: any, sIdx: number) => (
                     <div
                       key={item.id}
-                      className={`p-4 flex justify-between items-center ${
+                      className={`p-4 flex flex-col gap-3 ${
                         sIdx !== 0 ? "border-t border-gray-50" : ""
                       }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-2 h-2 rounded-full ${
-                            sIdx === 0
-                              ? "bg-amber-400 animate-pulse"
-                              : "bg-gray-200"
-                          }`}
-                        />
-                        <div>
-                          <div className="text-[10px] font-black text-gray-400">
-                            {item.shopName}
-                          </div>
-                          <div className="font-black text-base">
-                            ¥{Number(item.price).toLocaleString()}
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-2 h-2 rounded-full ${
+                              sIdx === 0
+                                ? "bg-amber-400 animate-pulse"
+                                : "bg-gray-200"
+                            }`}
+                          />
+                          <div>
+                            <div className="text-[10px] font-black text-gray-400">
+                              {item.shopName}
+                            </div>
+                            <div className="font-black text-base">
+                              ¥{Number(item.price).toLocaleString()}
+                            </div>
                           </div>
                         </div>
+                        <button
+                          onClick={() =>
+                            router.push(`/add-product?editId=${item.id}`)
+                          }
+                          className="p-2 text-gray-400"
+                        >
+                          <ChevronRight size={18} />
+                        </button>
                       </div>
-                      <button
-                        onClick={() =>
-                          router.push(`/add-product?editId=${item.id}`)
-                        }
-                        className="p-2 text-gray-400"
-                      >
-                        <ChevronRight size={18} />
-                      </button>
+                      {/* 在庫操作バー（商品ごとモード） */}
+                      <div className="flex items-center justify-between bg-gray-50 rounded-xl p-2 px-4">
+                        <span className="text-xs font-bold text-gray-400">
+                          在庫:{" "}
+                          <span className="text-blue-600 text-sm">
+                            {item.stock ?? 0}
+                          </span>
+                        </span>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() =>
+                              handleUpdateStock(item.id, item.stock ?? 0, -1)
+                            }
+                            className="p-1 text-gray-400"
+                          >
+                            <Minus size={14} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              handleUpdateStock(item.id, item.stock ?? 0, 1)
+                            }
+                            className="p-1 text-blue-600"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
