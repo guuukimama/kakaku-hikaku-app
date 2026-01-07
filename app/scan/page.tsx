@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react"; // Suspense を追加
 import { Html5Qrcode } from "html5-qrcode";
-import { useRouter, useSearchParams } from "next/navigation"; // useSearchParams を追加
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, AlertCircle, RefreshCw, Loader2 } from "lucide-react";
 
-export default function ScanPage() {
+// ロジック部分を別コンポーネントに切り出し
+function Scanner() {
   const router = useRouter();
-  const searchParams = useSearchParams(); // 追加
+  const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -36,18 +37,12 @@ export default function ScanPage() {
           qrCodeRef.current = new Html5Qrcode("reader");
         }
 
-        // ★ 修正：スキャン成功時の処理
         const onScanSuccess = (decodedText: string) => {
           stopScanner();
-
-          // modeパラメータを確認
           const mode = searchParams.get("mode");
-
           if (mode === "add") {
-            // 商品登録画面から来た場合：add-product ページへ戻る
             router.push(`/add-product?jan=${decodedText}`);
           } else {
-            // それ以外（TOPなど）から来た場合：検索結果としてTOPへ
             router.push(`/?search=${decodedText}`);
           }
         };
@@ -66,9 +61,6 @@ export default function ScanPage() {
             () => {}
           );
         } catch (e) {
-          console.warn(
-            "背面カメラが見つからないため、汎用的な設定で再開します"
-          );
           await qrCodeRef.current.start(
             { facingMode: "user" },
             config,
@@ -82,7 +74,6 @@ export default function ScanPage() {
           setIsInitializing(false);
         }
       } catch (err: any) {
-        console.error("Fatal Scanner Error:", err);
         if (isMounted) {
           setError(
             "カメラにアクセスできません。設定を確認し、リロードしてください。"
@@ -102,9 +93,52 @@ export default function ScanPage() {
       clearTimeout(timer);
       stopScanner();
     };
-  }, [router, searchParams]); // searchParams を依存配列に追加
+  }, [router, searchParams]);
 
-  // --- 以下、JSX部分は変更なし ---
+  return (
+    <div className="max-w-md mx-auto relative">
+      <div
+        id="reader"
+        className="overflow-hidden rounded-[40px] border-2 border-white/10 bg-gray-900 shadow-2xl aspect-square"
+      />
+
+      {isInitializing && !error && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 rounded-[40px] z-10">
+          <Loader2 className="animate-spin text-blue-500 mb-2" size={32} />
+          <p className="text-xs font-bold text-gray-400">カメラを起動中...</p>
+        </div>
+      )}
+
+      {isScanning && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[150px] pointer-events-none z-20">
+          <div className="w-[250px] h-full mx-auto border-2 border-blue-500 rounded-lg relative">
+            <div className="absolute w-full h-[2px] bg-blue-500 top-0 animate-scan-line" />
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-6 p-4 bg-red-500/20 border border-red-500 rounded-2xl flex items-center gap-3 text-red-200">
+          <AlertCircle size={20} />
+          <p className="text-[11px] font-bold leading-relaxed">{error}</p>
+        </div>
+      )}
+
+      <button
+        onClick={() => window.location.reload()}
+        className="mt-8 mx-auto flex items-center gap-2 text-[10px] font-black text-gray-500 bg-white/5 px-4 py-2 rounded-full active:bg-white/10 transition-colors"
+      >
+        <RefreshCw size={12} />
+        カメラが映らない場合はリロード
+      </button>
+    </div>
+  );
+}
+
+// メインのページコンポーネント
+export default function ScanPage() {
+  const router = useRouter();
+
   return (
     <main
       className="min-h-screen bg-black text-white p-4"
@@ -117,14 +151,18 @@ export default function ScanPage() {
         <h1 className="font-black text-lg">スキャン</h1>
         <div className="w-10"></div>
       </div>
-      {/* ...省略（既存のUIコード）... */}
-      <div className="max-w-md mx-auto relative">
-        <div
-          id="reader"
-          className="overflow-hidden rounded-[40px] border-2 border-white/10 bg-gray-900 shadow-2xl aspect-square"
-        />
-        {/* ...（中略）... */}
-      </div>
+
+      {/* ここで Suspense を使う */}
+      <Suspense
+        fallback={
+          <div className="flex flex-col items-center justify-center h-64">
+            <Loader2 className="animate-spin text-blue-500" size={32} />
+          </div>
+        }
+      >
+        <Scanner />
+      </Suspense>
+
       <style jsx global>{`
         #reader video {
           object-fit: cover !important;
