@@ -13,7 +13,9 @@ import {
   Store,
   Plus,
   Loader2,
-  Hash, // 追加
+  Hash,
+  Camera, // 追加
+  Barcode, // 追加
 } from "lucide-react";
 
 function AddProductForm() {
@@ -32,7 +34,7 @@ function AddProductForm() {
   const [unit, setUnit] = useState("g");
   const [customUnit, setCustomUnit] = useState("");
   const [size, setSize] = useState("");
-  const [quantityInPack, setQuantityInPack] = useState("1"); // デフォルト1
+  const [quantityInPack, setQuantityInPack] = useState("1");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const unitOptions = ["g", "ml", "個", "パック", "本", "枚"];
@@ -48,6 +50,7 @@ function AddProductForm() {
     };
     fetchShops();
 
+    // ★ URLパラメータにjanがあればセット
     const janParam = searchParams.get("jan");
     if (janParam) setJan(janParam);
 
@@ -94,11 +97,10 @@ function AddProductForm() {
       price: Number(price),
       shop_id: shopId,
       stock: Number(stock),
-      jan,
+      jan, // ★ JANコードを保存対象に含める
       amount,
       unit: finalUnit,
       size,
-      // パック以外の場合は1、パックの場合は入力値を保存
       quantity_in_pack: unit === "パック" ? Number(quantityInPack) : 1,
     };
 
@@ -143,6 +145,29 @@ function AddProductForm() {
       </h1>
 
       <div className="space-y-6 bg-white p-6 rounded-[32px] shadow-sm border border-gray-100">
+        {/* ★ JANコード入力セクションを追加 */}
+        <div>
+          <label className="text-[10px] font-black text-gray-400 mb-1 block uppercase tracking-widest flex items-center gap-1">
+            <Barcode size={12} /> JANコード（バーコード）
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="例: 4901234567890"
+              className="flex-1 p-3 bg-gray-50 rounded-2xl outline-none text-sm font-bold border-2 border-transparent focus:border-blue-100"
+              value={jan}
+              onChange={(e) => setJan(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => router.push("/scan?mode=add")}
+              className="bg-blue-600 text-white p-3 rounded-2xl shadow-md shadow-blue-100 active:scale-95 transition-transform"
+            >
+              <Camera size={20} />
+            </button>
+          </div>
+        </div>
+
         <div className="space-y-4">
           <div>
             <label className="text-[10px] font-black text-gray-400 mb-1 block uppercase tracking-widest flex items-center gap-1">
@@ -286,7 +311,6 @@ function AddProductForm() {
           </div>
         </div>
 
-        {/* ★ パックの数量入力 (条件付き表示) */}
         {unit === "パック" && (
           <div className="bg-blue-50 p-4 rounded-3xl border border-blue-100 animate-in fade-in slide-in-from-top-2">
             <label className="text-[10px] font-black text-blue-600 mb-2 block uppercase tracking-widest flex items-center gap-1">
