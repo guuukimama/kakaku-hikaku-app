@@ -229,7 +229,18 @@ function HomeContent() {
                                 最安値
                               </span>
                             )}
+                            {/* ★ 在庫数の表示を追加 */}
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
+                                p.stock > 0
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-gray-100 text-gray-500"
+                              }`}
+                            >
+                              在庫: {p.stock}
+                            </span>
                           </div>
+
                           <div className="flex items-end gap-2">
                             <div className="leading-none">
                               <span
@@ -255,6 +266,7 @@ function HomeContent() {
                             </div>
                           </div>
                         </div>
+                        {/* ...（ボタン部分はそのまま） */}
                         <button
                           onClick={() => addToCart(p)}
                           className={`${
