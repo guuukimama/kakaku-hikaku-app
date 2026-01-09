@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import Footer from "./Footer/page.tsx";
+import Footer from "./Footer/page";
 import {
   Search,
   Camera,
