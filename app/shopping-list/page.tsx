@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import Footer from "../Footer/page.tsx";
+import Footer from "../Footer/page";
 import {
   RefreshCcw,
   PackageSearch,
